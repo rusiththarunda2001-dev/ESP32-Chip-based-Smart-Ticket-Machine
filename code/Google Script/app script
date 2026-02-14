@@ -1,0 +1,451 @@
+// ====================================================================
+// CONFIGURATION
+// ====================================================================
+const SPREADSHEET_ID = '1Y6J61NBke8_c-SV1jtvmOpy2op4ER3tjR5njHDpDv-s';
+const PASSENGER_SHEET_NAME = 'passenger';
+
+// Column Indices (1-based for Apps Script)
+const COL_RFID = 1;      // Column A
+const COL_NAME = 2;      // Column B
+const COL_BALANCE = 3;   // Column C
+const COL_PIN = 4;       // Column D
+const COL_STATUS = 5;    // Column E
+
+
+// ====================================================================
+// 1. HELPER: Find Passenger by RFID OR Name (Modified)
+// ====================================================================
+function getPassengerData(sheet, searchKey) {
+  var data = sheet.getDataRange().getValues();
+  // Col A=RFID (Index 0), Col B=Name (Index 1)
+  
+  // Prepare the search key: convert to uppercase and trim spaces for case-insensitive matching
+  var searchKeyStr = String(searchKey).toUpperCase().trim();
+
+  for (var i = 1; i < data.length; i++) {
+    var rfid = String(data[i][0]).toUpperCase().trim();
+    var name = String(data[i][1]).toUpperCase().trim();
+    
+    // Check 1: Does the search key match the RFID exactly? (Good for exact RFID search)
+    // OR
+    // Check 2: Is the search key contained anywhere within the Name? (Good for name search)
+    if (rfid === searchKeyStr || name.includes(searchKeyStr)) {
+      // If a match is found in either column, return the passenger data
+      return {
+        rfid: data[i][0],
+        name: data[i][1],
+        balance: data[i][2],
+        pin: data[i][3],
+        status: data[i][4]
+      };
+    }
+  }
+  return null;
+}
+
+// ====================================================================
+// 2. HELPER: Get All Stations & 3 Prices (for doGet)
+// ====================================================================
+function getAllStations(sheet) {
+  var stationsList = [];
+  var data = sheet.getDataRange().getValues();
+  // Assumes: Col A=Name, Col B=Price1, Col C=Price2, Col D=Price3
+  for (var i = 1; i < data.length; i++) {
+    if (data[i][0]) { // If station name exists
+      stationsList.push({
+        name: data[i][0],
+        price1: data[i][1],
+        price2: data[i][2],
+        price3: data[i][3]
+      });
+    }
+  }
+  return stationsList;
+}
+
+
+// ====================================================================
+// 3. MAIN: Handle GET Requests (Read Data - Used by Admin Search & ESP32)
+// ====================================================================
+function doGet(e) {
+  // NEW: Check if this is a transaction request from Admin Panel
+  if (e.parameter.action === 'getTransactions' && e.parameter.modelId) {
+    return getTransactions(e.parameter.modelId);
+  }
+
+  // NEW: Check if this is a machine data request from Admin Panel
+  if (e.parameter.action === 'getMachine' && e.parameter.modelId) {
+    return getMachineData(e.parameter.modelId);
+  }
+
+  // EXISTING: Passenger search for Admin Panel or ESP32
+  var rfid = e.parameter.rfid;
+  var machineName = e.parameter.machine; 
+
+  if (!rfid) return ContentService.createTextOutput("Missing RFID");
+  if (!machineName) return ContentService.createTextOutput("Missing Machine ID"); 
+
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var passengerSheet = ss.getSheetByName(PASSENGER_SHEET_NAME);
+  
+  var destSheet = ss.getSheetByName(machineName); 
+  
+  if (!destSheet) {
+    return ContentService.createTextOutput(JSON.stringify({ error: "Machine sheet not found" }))
+        .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // Get the machine's "start station" name from its own sheet (cell F1)
+  var ticketmachinestation = destSheet.getRange("F1").getValue();
+
+  // 1. Read Passenger Data (from shared sheet)
+  var passengerData = getPassengerData(passengerSheet, rfid);
+  if (!passengerData) {
+      return ContentService.createTextOutput(JSON.stringify({ error: "RFID NOT FOUND" }))
+        .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // 2. Read Station Data (from the machine-specific sheet)
+  var stationsData = getAllStations(destSheet);
+
+  // 3. Combine and Return JSON
+  var response = {
+    passenger: passengerData,
+    stations: stationsData,
+    machine: ticketmachinestation
+  };
+  return ContentService.createTextOutput(JSON.stringify(response))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+
+// ====================================================================
+// 4. MAIN: Handle POST Requests (Write Data - Machine OR Admin)
+// ====================================================================
+function doPost(e) {
+  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  var passengerSheet = ss.getSheetByName(PASSENGER_SHEET_NAME);
+  
+  try {
+    // Parse the incoming JSON data
+    var json = JSON.parse(e.postData.contents);
+
+    // NEW: Check if this is a machine update request from Admin Panel
+    if (json.action === 'updateMachine') {
+      return updateMachineData(json);
+    }
+
+    // EXISTING: Check for RFID (required for passenger operations)
+    var rfid = json.rfid;
+    if (!rfid) throw new Error("Missing RFID in POST data");
+
+    // --- CHECK 1: ADMIN PANEL UPDATE ---
+    // The Admin Panel POST request sends name, pin, status, and balance.
+    if (json.name && json.pin && json.status && json.balance !== undefined) {
+      return handleAdminUpdate(passengerSheet, json);
+    } 
+    
+    // --- CHECK 2: TICKET MACHINE TRANSACTION (Original Logic for ESP32) ---
+    else if (json.action) {
+      return handleMachineTransaction(ss, passengerSheet, json);
+    } 
+    
+    else {
+      return ContentService.createTextOutput("Unknown or incomplete POST action.");
+    }
+
+  } catch (err) {
+    return ContentService.createTextOutput("Error: " + err.message);
+  }
+}
+
+// ====================================================================
+// 5. HELPER: Handle Admin Panel Updates (Passenger)
+// ====================================================================
+function handleAdminUpdate(passengerSheet, json) {
+    // 1. Find the passenger's row number in 'passenger' sheet
+    var data = passengerSheet.getDataRange().getValues();
+    var row = -1;
+    for (var i = 1; i < data.length; i++) {
+        if (String(data[i][COL_RFID - 1]) === String(json.rfid)) {
+            row = i + 1; // Rows are 1-indexed
+            break;
+        }
+    }
+    if (row === -1) throw new Error("RFID not found for update");
+
+    // 2. Update all fields (Columns: B, C, D, E)
+    passengerSheet.getRange(row, COL_NAME).setValue(json.name);
+    passengerSheet.getRange(row, COL_BALANCE).setValue(parseFloat(json.balance));
+    passengerSheet.getRange(row, COL_PIN).setValue(json.pin);
+    passengerSheet.getRange(row, COL_STATUS).setValue(json.status);
+
+    return ContentService.createTextOutput("Passenger record updated successfully!");
+}
+
+// ====================================================================
+// 6. HELPER: Handle Machine Transactions (Original logic for ESP32)
+// ====================================================================
+function handleMachineTransaction(ss, passengerSheet, json) {
+    var rfid = json.rfid;
+    var machineName = json.machine; 
+
+    if (!machineName) {
+      throw new Error("Missing Machine ID in POST data");
+    }
+
+    var destSheet = ss.getSheetByName(machineName);
+    if (!destSheet) {
+      throw new Error("Machine sheet not found for update: " + machineName);
+    }
+
+    // 1. Find the passenger's row number in 'passenger' sheet
+    var data = passengerSheet.getDataRange().getValues();
+    var row = -1;
+    for (var i = 1; i < data.length; i++) {
+        if (String(data[i][COL_RFID - 1]) === String(rfid)) {
+            row = i + 1; 
+            break;
+        }
+    }
+    if (row === -1) throw new Error("RFID not found for update");
+
+
+    // --- ACTION 1: Block Account ---
+    if (json.action === "blockAccount") {
+        passengerSheet.getRange(row, COL_STATUS).setValue("Blocked");
+        return ContentService.createTextOutput("Account Blocked");
+
+    // --- ACTION 2: Deduct Balance & Log Transaction ---
+    } else if (json.action === "deductBalance") {
+        // A. Update Balance in 'passenger' sheet (SHARED)
+        passengerSheet.getRange(row, COL_BALANCE).setValue(json.newBalance);
+
+        // B. Log to 'destination' sheet (DYNAMIC)
+        if (json.totalPrice !== undefined) {
+            var now = new Date();
+            var dateStr = Utilities.formatDate(now, Session.getScriptTimeZone(), "yyyy-MM-dd");
+            var timeStr = Utilities.formatDate(now, Session.getScriptTimeZone(), "HH:mm:ss");
+
+            // Simplified log row finding
+            var nextRow = destSheet.getLastRow() + 1;
+
+            // Write Log Data to the DYNAMIC sheet (Assumes columns I, J, K, L, M)
+            destSheet.getRange(nextRow, 9).setValue(dateStr);
+            destSheet.getRange(nextRow, 10).setValue(timeStr);
+            destSheet.getRange(nextRow, 11).setValue(rfid);
+            destSheet.getRange(nextRow, 12).setValue(data[row-1][COL_NAME - 1]); // Passenger name
+            destSheet.getRange(nextRow, 13).setValue(json.totalPrice);
+        }
+
+        return ContentService.createTextOutput("Payment Success");
+    } else {
+        return ContentService.createTextOutput("Unknown action");
+    }
+}
+
+// ====================================================================
+// 7. NEW: Get Machine Data (for Admin Panel)
+// ====================================================================
+function getMachineData(modelId) {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(modelId);
+    
+    if (!sheet) {
+      return ContentService.createTextOutput(JSON.stringify({
+        error: "Machine sheet '" + modelId + "' not found"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Get assigned station from cell F1
+    var assignedStation = sheet.getRange('F1').getValue();
+    
+    // Get station pricing data (starting from row 2)
+    var data = sheet.getDataRange().getValues();
+    
+    var stations = [];
+    for (var i = 1; i < data.length; i++) {
+      var row = data[i];
+      
+      // Stop if station name is empty
+      if (!row[0]) break;
+      
+      stations.push({
+        name: row[0],      // Column A: Station Name
+        class1: row[1],    // Column B: 1st Class Price
+        class2: row[2],    // Column C: 2nd Class Price
+        class3: row[3]     // Column D: 3rd Class Price
+      });
+    }
+    
+    var result = {
+      machine: {
+        modelId: modelId,
+        assignedStation: assignedStation,
+        stations: stations
+      }
+    };
+    
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+    
+  } catch (error) {
+    return ContentService.createTextOutput(JSON.stringify({
+      error: "Error loading machine: " + error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+// ====================================================================
+// 8. NEW: Update Machine Data (for Admin Panel)
+// ====================================================================
+function updateMachineData(data) {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(data.modelId);
+    
+    if (!sheet) {
+      return ContentService.createTextOutput("Machine sheet '" + data.modelId + "' not found");
+    }
+    
+    // Update assigned station in cell F1
+    sheet.getRange('F1').setValue(data.assignedStation);
+    
+    // STEP 1: Find the actual last row with data in column A (station names)
+    var lastRow = sheet.getLastRow();
+    
+    // STEP 2: Clear ALL existing station data (from row 2 to the end)
+    if (lastRow >= 2) {
+      // Calculate how many rows to clear
+      var rowsToDelete = lastRow - 1; // Subtract 1 because row 1 is the header
+      
+      // Clear content from row 2 to lastRow, columns A to D
+      sheet.getRange(2, 1, rowsToDelete, 4).clearContent();
+    }
+    
+    // STEP 3: Write new station data (starting from row 2)
+    if (data.stations.length > 0) {
+      // Prepare data array for batch writing (more efficient)
+      var values = [];
+      for (var i = 0; i < data.stations.length; i++) {
+        var station = data.stations[i];
+        values.push([
+          station.name,   // Column A
+          station.class1, // Column B
+          station.class2, // Column C
+          station.class3  // Column D
+        ]);
+      }
+      
+      // Write all station data at once
+      sheet.getRange(2, 1, values.length, 4).setValues(values);
+    }
+    
+    return ContentService.createTextOutput("Machine " + data.modelId + " updated successfully");
+    
+  } catch (error) {
+    return ContentService.createTextOutput("Error updating machine: " + error.toString());
+  }
+}
+
+// ====================================================================
+// 9. NEW: Get Transactions (for Admin Panel)
+// ====================================================================
+function getTransactions(modelId) {
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(modelId);
+    
+    if (!sheet) {
+      return ContentService.createTextOutput(JSON.stringify({
+        error: "Machine sheet '" + modelId + "' not found"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Get the actual last row with data
+    var lastRow = sheet.getLastRow();
+    
+    Logger.log("Sheet name: " + modelId);
+    Logger.log("Last row in sheet: " + lastRow);
+    
+    if (lastRow < 2) {
+      // No data rows (only header or empty)
+      return ContentService.createTextOutput(JSON.stringify({
+        transactions: []
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+    
+    // Read transaction data from columns I to M (NOT H to M)
+    // Column I=9 (Date), J=10 (Time), K=11 (RFID), L=12 (Name), M=13 (Price)
+    var dataRange = sheet.getRange(2, 9, lastRow - 1, 5); // Start column I (9), read 5 columns
+    var data = dataRange.getValues();
+    
+    Logger.log("Data rows retrieved: " + data.length);
+    
+    // Log first data row for debugging
+    if (data.length > 0) {
+      Logger.log("First data row: " + JSON.stringify(data[0]));
+    }
+    
+    var transactions = [];
+    for (var i = 0; i < data.length; i++) {
+      var row = data[i];
+      
+      // Check if the row has transaction data (Date exists in column I)
+      if (row[0] && String(row[0]).trim() !== "") {
+        
+        // Format date properly
+        var dateValue = row[0];
+        var formattedDate = '';
+        
+        if (dateValue instanceof Date) {
+          formattedDate = Utilities.formatDate(dateValue, Session.getScriptTimeZone(), "yyyy-MM-dd");
+        } else {
+          var dateString = String(dateValue).trim();
+          if (dateString.match(/^\d{4}-\d{2}-\d{2}$/)) {
+            formattedDate = dateString;
+          } else {
+            try {
+              var parsedDate = new Date(dateString);
+              if (!isNaN(parsedDate.getTime())) {
+                formattedDate = Utilities.formatDate(parsedDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+              } else {
+                formattedDate = dateString;
+              }
+            } catch (e) {
+              formattedDate = dateString;
+            }
+          }
+        }
+        
+        // Columns: I=0 (Date), J=1 (Time), K=2 (RFID), L=3 (Name), M=4 (Price)
+        transactions.push({
+          date: formattedDate,           // Column I (index 0)
+          time: String(row[1]),          // Column J (index 1)
+          rfid: String(row[2]),          // Column K (index 2)
+          name: String(row[3]),          // Column L (index 3)
+          price: Number(row[4])          // Column M (index 4)
+        });
+      }
+    }
+    
+    Logger.log("Total transactions found: " + transactions.length);
+    if (transactions.length > 0) {
+      Logger.log("First transaction: " + JSON.stringify(transactions[0]));
+    }
+    
+    var result = {
+      transactions: transactions
+    };
+    
+    return ContentService.createTextOutput(JSON.stringify(result))
+      .setMimeType(ContentService.MimeType.JSON);
+    
+  } catch (error) {
+    Logger.log("Error: " + error.toString());
+    return ContentService.createTextOutput(JSON.stringify({
+      error: "Error loading transactions: " + error.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
+}
