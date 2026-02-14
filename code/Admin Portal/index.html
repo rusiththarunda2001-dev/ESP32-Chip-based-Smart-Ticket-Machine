@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Ticket Admin</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <div class="app-container">
+
+        <!-- HOME PAGE -->
+        <section id="home-page" class="page active">
+            <h1 class="main-title">SMART TICKET</h1>
+            <p class="subtitle">Admin Control Panel</p>
+            
+            <div class="nav-grid">
+                <div class="nav-card" onclick="showPage('passenger-page')">
+                    <div class="icon">👤</div>
+                    <h3>PASSENGER</h3>
+                    <p>Manage Users</p>
+                </div>
+                <div class="nav-card" onclick="showPage('ticket-machine-page')">
+                    <div class="icon">🏧</div>
+                    <h3>TICKET MACHINE</h3>
+                    <p>Config Stations</p>
+                </div>
+                <div class="nav-card" onclick="showPage('transaction-page')">
+                    <div class="icon">📊</div>
+                    <h3>TRANSACTION</h3>
+                    <p>View Logs</p>
+                </div>
+            </div>
+        </section>
+
+
+        <!-- PASSENGER PAGE -->
+        <section id="passenger-page" class="page hidden">
+            <div class="page-header">
+                <button class="back-btn" onclick="showPage('home-page')">← Back</button>
+                <h2>PASSENGER MANAGEMENT</h2>
+            </div>
+            
+            <div class="search-box">
+                <input type="text" id="passenger-search" placeholder="Enter Name or RFID...">
+                <button onclick="searchPassenger()">SEARCH</button>
+            </div>
+
+            <div class="form-grid">
+                <div class="input-group">
+                    <label>NAME</label>
+                    <input type="text" id="p-name" class="editable">
+                </div>
+                <div class="input-group">
+                    <label>RFID (READ ONLY)</label>
+                    <input type="text" id="p-rfid" class="not-editable" readonly>
+                </div>
+                <div class="input-group">
+                    <label>PIN</label>
+                    <input type="text" id="p-pin" class="editable">
+                </div>
+                <div class="input-group">
+                    <label>STATUS</label>
+                    <select id="p-status" class="editable">
+                        <option>Active</option>
+                        <option>Blocked</option>
+                    </select>
+                </div>
+                <div class="input-group full-width">
+                    <label>BALANCE (LKR)</label>
+                    <input type="text" id="p-balance" class="editable">
+                </div>
+            </div>
+            <button class="action-btn" onclick="updatePassenger()">UPDATE RECORD</button>
+        </section>
+
+
+        <!-- TICKET MACHINE PAGE -->
+        <section id="ticket-machine-page" class="page hidden">
+            <div class="page-header">
+                <button class="back-btn" onclick="showPage('home-page')">← Back</button>
+                <h2>MACHINE CONFIG</h2>
+            </div>
+
+            <div class="search-box">
+                <input type="text" id="machine-search" placeholder="Enter Model ID...">
+                <button onclick="searchMachine()">LOAD</button>
+            </div>
+
+            <div class="form-grid">
+                <div class="input-group full-width">
+                    <label>ASSIGNED STATION</label>
+                    <input type="text" id="m-station" class="editable">
+                </div>
+            </div>
+
+            <div class="station-header">
+                <h3 class="section-heading">Station Pricing</h3>
+                <button class="add-station-btn" onclick="addNewStation()">
+                    ➕ ADD STATION
+                </button>
+            </div>
+            
+            <div class="table-wrapper">
+                <table class="styled-table">
+                    <thead>
+                        <tr>
+                            <th>STATION</th>
+                            <th>1st CLASS</th>
+                            <th>2nd CLASS</th>
+                            <th>3rd CLASS</th>
+                            <th>ACTION</th>
+                        </tr>
+                    </thead>
+                    <tbody id="machine-stations-body">
+                    </tbody>
+                </table>
+            </div>
+            
+            <button class="action-btn" onclick="saveMachineChanges()">SAVE CHANGES</button>
+        </section>
+
+
+        <!-- TRANSACTION PAGE -->
+        <section id="transaction-page" class="page hidden">
+            <div class="page-header">
+                <button class="back-btn" onclick="showPage('home-page')">← Back</button>
+                <h2>TRANSACTION HISTORY</h2>
+            </div>
+
+            <div class="filter-box">
+                <div class="input-group">
+                    <label>MODEL ID</label>
+                    <input type="text" id="t-model-id">
+                </div>
+                <div class="input-group">
+                    <label>DATE</label>
+                    <input type="date" id="t-date">
+                </div>
+                <button class="filter-btn" onclick="filterTransactions()">APPLY FILTER</button>
+            </div>
+
+            <div class="table-wrapper">
+                <table class="styled-table readonly">
+                    <thead>
+                        <tr>
+                            <th>NAME</th>
+                            <th>TIME</th>
+                            <th>RFID</th>
+                            <th>PRICE</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transaction-body">
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
