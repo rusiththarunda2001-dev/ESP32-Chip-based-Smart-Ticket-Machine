@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Passenger Portal</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+
+    <div class="container">
+        
+        <div id="login-section" class="card">
+            <h2>Passenger Login</h2>
+            <form id="login-form">
+                <div class="form-group">
+                    <input type="text" id="username" placeholder="Username" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="password" placeholder="Password" required>
+                </div>
+                <button type="submit" class="primary-btn">Log In</button>
+                <p id="error-msg" class="error"></p>
+            </form>
+        </div>
+
+        <div id="dashboard-section" class="card hidden">
+            <h2>Welcome, <span id="display-name">User</span></h2>
+            
+            <div class="details-grid">
+                <div class="detail-item">
+                    <span class="label">Passenger Name:</span>
+                    <span class="value" id="res-name">--</span>
+                </div>
+                <div class="detail-item">
+                    <span class="label">RFID Tag:</span>
+                    <span class="value" id="res-rfid">--</span>
+                </div>
+                <div class="detail-item">
+                    <span class="label">Account Balance:</span>
+                    <span class="value highlight" id="res-balance">--</span>
+                </div>
+                <div class="detail-item">
+                    <span class="label">PIN Number:</span>
+                    <span class="value" id="res-pin">--</span>
+                </div>
+            </div>
+
+            <button id="topup-btn" class="success-btn">Top Up Balance</button>
+            <button id="logout-btn" class="secondary-btn">Log Out</button>
+        </div>
+
+        <div id="payment-section" class="card hidden">
+            <h3>Pay with card</h3>
+            
+            <div class="payment-icons">
+                <i class="fab fa-cc-paypal" style="color: #003087;"></i>
+                <i class="fab fa-cc-visa" style="color: #1a1f71;"></i>
+                <i class="fab fa-cc-mastercard" style="color: #eb001b;"></i>
+                <i class="fab fa-cc-amex" style="color: #27aee3;"></i>
+            </div>
+
+            <form id="payment-form">
+                <div class="form-group">
+                    <input type="number" id="topup-amount" placeholder="Top Up Amount (e.g. 500)" min="1" required>
+                </div>
+
+                <div class="form-group">
+                    <input type="text" placeholder="Full Name" required>
+                </div>
+
+                <div class="form-group">
+                    <input type="text" placeholder="Card Number" maxlength="19" required>
+                </div>
+
+                <div class="row">
+                    <div class="form-group half">
+                        <input type="text" placeholder="MM/YY" maxlength="5" required>
+                    </div>
+                    <div class="form-group half">
+                        <input type="password" placeholder="CVV" maxlength="3" required>
+                    </div>
+                </div>
+
+                <button type="submit" class="pay-btn">Pay Now</button>
+                <button type="button" id="cancel-payment-btn" class="cancel-link">Cancel</button>
+            </form>
+        </div>
+
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
